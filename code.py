@@ -1,4 +1,6 @@
 import torch
 
 x = torch.tensor([3,3])
-print(x)
+
+for _ in range(100):
+    print(x)
