@@ -1,4 +1,4 @@
 import torch
 
-x = torch.tensor([2,3])
+x = torch.tensor([3,3])
 print(x)
