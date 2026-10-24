@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
-from go import Game
+from Games.Go9x9.environment import Game
 
 game = Game()
 

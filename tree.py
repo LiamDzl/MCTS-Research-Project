@@ -1,168 +1,140 @@
 import torch
-import torch.nn.functional as F
-
+ 
 import numpy as np
 import math
+import json
+import copy
+import importlib
 
-from neural_network import state_to_tensor
-
-dirichlet = torch.distributions.Dirichlet(torch.full((7,), 0.13))
-epsilon = 0.25
-exploration_constant = 1.25
-search_depth = 200
-
-def PUCT(parent, child): # parent and child are "Node" objects
+def PUCT(parent, child, exploration_constant): # parent and child are "Node" objects
     # +--- Compute Prior/Exploration (Right of Equation) ----+
     prior_score = child.prior * math.sqrt(parent.visit_count + 1) / (child.visit_count + 1)
     prior_score *= exploration_constant
-
+ 
     # +--- Compute Value (Left of Equation) ----+
-    if child.visit_count > 0:
-        value_score = child.value()
-    else:
-        value_score = 0
-
+    value_score = child.compute_value()
+ 
     return value_score + prior_score
 
 class Node: # initialise on discovery
-    def __init__(self, prior, to_move, model):
-        self.prior = prior # parent's probability viewpoint of choosing child (scalar)
+    def __init__(self, prior, to_move, search):
+        self.prior = prior
         self.to_move = to_move
-        self.model = model
-        self.state = None
-
-        self.nn_dist = None
+        self.search = search
+        self.game = None
+ 
         self.value_sum = 0.
         self.visit_count = 0
-        self.parent = None # stores single parent ("Node" object)
+        self.parent = None
         self.parent_action = None
-        self.children = [None] * 82 # for each possible action
-
+        self.children = []
+ 
         self.is_terminal = False
-        self.is_root = False
+        self.terminal_value = 0.
         self.is_expanded = False
 
-    def expand(self, state):
+    def expand(self, game):
         self.is_expanded = True
-        self.state = state
-        x = state_to_tensor(state)
-        output = self.model.forward(x)
-
+        self.game = game
+        self.to_move = game.state.to_move
+ 
+        x = self.search.state_to_tensor(game.state)
+ 
+        with torch.no_grad():
+            output = self.search.model(x, mask=game.state.mask)[0]
+ 
         nn_dist = output[:-1]
-        nn_value = output[-1]
-
-        for child_index, probability in enumerate(nn_dist):
-            if probability != 0:
-                self.children[child_index] = Node(prior=probability,
-                                                  to_move=2 if self.to_move == 1 else 1,
-                                                  model=self.model)
-                
-                self.children[child_index].parent = self
-                self.children[child_index].parent_action = child_index
-
+        nn_value = output[-1].item()
+ 
+        self.children = [None] * len(nn_dist)
+        for child_index, probability in enumerate(nn_dist.tolist()):
+            if probability > 0:
+                child = Node(prior=probability, to_move=None, search=self.search)
+                child.parent = self
+                child.parent_action = child_index
+                self.children[child_index] = child
+ 
         return nn_value, nn_dist
 
     def compute_value(self):
         if self.visit_count == 0:
-                return 0
+            return 0
         return self.value_sum / self.visit_count
-
+ 
     def compute_best_child(self):
-        selected = None
-        for child in self.children:
-            if child is not None:
-                selected = child
-                break
-        
-        for child in self.children: # compare childrens' PUCT scores
-            if child == None:
-                pass
-            # +--- Maximise PUCT ---+
-            elif PUCT(self, child, exploration_constant=exploration_constant) > PUCT(self, selected, exploration_constant=exploration_constant):
-                selected = child
-
-        return selected
-
-    def reset_root(self, state):
-        self.state = state.detach().clone()
+        c = self.search.exploration_constant
+        return max((child for child in self.children if child is not None),
+                   key=lambda child: PUCT(self, child, c))
 
 class TreeSearch:
-    def __init__(self, model):
+    def __init__(self, environment, model):
+        self.environment = environment
         self.model = model
         self.model.eval()
-        self.explored_nodes = set()
-
-    def search(self, game): # keep true game separate to simulated game to compute correct ko 
-        # +--- Create Root ---+
-        state = game.trajectory[-1] # last position
-        root = Node(prior=None, to_move=state.to_move, model=self.model)
-        root.is_root = True
-        root.expand(state=state)
-        self.explored_nodes.add(root)
-
+ 
+        representation = importlib.import_module(f"Games.{environment}.representation")
+        self.state_to_tensor = representation.state_to_tensor
+ 
+        with open(f"Games/{environment}/config.json") as file:
+            config = json.load(file)
+ 
+        self.hyperparameters = config["hyperparameters"]
+        self.alpha = self.hyperparameters["alpha"]
+        self.epsilon = self.hyperparameters["epsilon"]
+        self.exploration_constant = self.hyperparameters["exploration_constant"]
+        self.search_depth = self.hyperparameters["search_depth"]
+ 
+    def search(self, game):
+        root = Node(prior=None, to_move=None, search=self)
+        root.expand(copy.deepcopy(game))
+ 
         # +--- Add Dirichlet Noise to Root ---+
-        nablas = dirichlet.sample()
-        for index, child in enumerate(root.children):
-            try:
-                child.prior = (1 - epsilon) * child.prior + epsilon * nablas[index].item()
-            except:
-                pass
-
+        legal = [child for child in root.children if child is not None]
+        nablas = np.random.dirichlet([self.alpha] * len(legal))
+        for child, nabla in zip(legal, nablas):
+            child.prior = (1 - self.epsilon) * child.prior + self.epsilon * nabla
+ 
         # +--- Main Search Loop ---+
-        for iteration in range(search_depth):
-            simulation = game
-            to_move = state.to_move
-            root.reset_root(state)
-            proceed = True
+        for iteration in range(self.search_depth):
             current_node = root
             path = [current_node]
-
-            # Continuously Check Current Node, Traverse Branch.
-            while current_node.is_expanded == True:
-                current_node = current_node.best_child()
+ 
+            # Traverse Branch:
+            while current_node.is_expanded:
+                current_node = current_node.compute_best_child()
                 path.append(current_node)
-                depth += 1
-
-                if current_node.is_terminal == True: # don't expand terminal states
-                    proceed = False
-                    break
-
-                to_move = 2 if self.to_move == 1 else 1
-
-            # +---  Select New Node and Expand ---+
-            if proceed == True:
-                parent_node = current_node.parent
-                grid = Grid(state=parent_node.state)
-                
-                state_save = copy.deepcopy(parent_node.state) # debugging error
-                grid.action(column=current_node.parent_action) # new state for new node
-                parent_node.state = state_save
-
-                nn_value, nn_dist = current_node.expand(state=grid.state) # Expand Node, Store Value to Backprop. up the Branch
-                self.explored_nodes.append(current_node)
-
-                nn_value = nn_value.item()
-                nn_value *= -1 # correct perspectives
-
-            # Check if Terminal  
-            if winner(current_node.state) != 0:
-                #graphic(current_node.state)
-                #print("")
-                current_node.is_terminal = True
-                nn_value = 1 # Overwrite Signal. Fix to +1, Backprop will handle +/- 1
-    
-                colour = -compute_player(current_node.state)
-                if colour == 1: # i.e. a win,
-                    red_wins += 1
-
+ 
+            if current_node.is_terminal:
+                value = current_node.terminal_value
+ 
+            else:
+                child_game = copy.deepcopy(current_node.parent.game)
+                child_game.play(child_game.index_to_move(current_node.parent_action))
+ 
+                if child_game.is_over():
+                    current_node.is_terminal = True
+                    current_node.game = child_game
+                    current_node.to_move = child_game.state.to_move
+ 
+                    if child_game.result == 0:
+                        current_node.terminal_value = 0.
+                    elif child_game.result == current_node.to_move:
+                        current_node.terminal_value = 1.
+                    else:
+                        current_node.terminal_value = -1.
+ 
+                    value = current_node.terminal_value
+ 
                 else:
-                    yellow_wins += 1
+                    value, _ = current_node.expand(child_game)
 
-                total_wins += 1
-
-            # Backpropagate up the Branch
             for history_node in path:
+                sign = -1 if history_node.to_move == current_node.to_move else 1
                 history_node.visit_count += 1
-                history_node.value_sum += (history_node.player * current_node.player) * nn_value
-
-
+                history_node.value_sum += sign * value
+ 
+        visits = np.array([child.visit_count if child is not None else 0
+                           for child in root.children], dtype=np.float32)
+        policy = visits / visits.sum()
+ 
+        return np.append(policy, -root.compute_value()).astype(np.float32)

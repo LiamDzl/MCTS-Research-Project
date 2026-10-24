@@ -1,0 +1,14 @@
+{
+"actions" : 168,
+"architecture" : {"upscale" : [3, 144],
+                  "residual_dimension" : 144,
+                  "residual_blocks" : 6,
+                  "downscale" : [144, 36],
+                  "policy_architecture" : [2304, 622, 168],
+                  "value_architecture": [2304, 48, 1]},
+                
+"hyperparameters" : {"alpha" : 0.3,
+                     "epsilon" : 0.25,
+                     "exploration_constant" : 1.25,
+                     "search_depth" : 400}
+}

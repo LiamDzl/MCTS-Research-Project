@@ -1,5 +1,3 @@
-import torch
-import torch.nn.functional as F
 import numpy as np
  
 border = "🌳"
@@ -37,11 +35,12 @@ class Group():
  
 class State():
     def __init__(self):
-        self.board =  np.zeros((9, 9), dtype=np.int8)
+        self.board = np.zeros((9, 9), dtype=np.float32)
         self.to_move = 1
+        self.mask = np.zeros(82, dtype=np.float32)
+        self.last_passed = False
  
     def show(self, prior, posterior):
-
         prior = prior.reshape(83)
         posterior = posterior.reshape(83)
 
@@ -93,6 +92,7 @@ class State():
 
         for column in range(10):
             print(border, end="")
+        
         print(border)
 
         print("")
@@ -108,12 +108,22 @@ class State():
             print(f"Search: {posterior_value:.3f}")
 
         print("")
+
+    def turn(self):
+        if self.to_move == 1:
+            self.to_move = 2
+        else:
+            self.to_move = 1
  
     def action(self, move): # move either a pass or a tuple (row, column) for stone
         if move == "pass":
             self.turn()
+            self.last_passed = True
             return True
- 
+
+        else:
+            self.last_passed = False
+
         resulting_board = self.resolve(move)
         if resulting_board is None:
             print("❌ Invalid Move.")
@@ -122,12 +132,6 @@ class State():
         self.board = resulting_board
         self.turn()
         return True
- 
-    def turn(self):
-        if self.to_move == 1:
-            self.to_move = 2
-        else:
-            self.to_move = 1
  
     def neighbours(self, row, column):
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
@@ -144,6 +148,7 @@ class State():
  
         row, column = point
         colour = board[row, column]
+
         if colour == 0:
             return None
  
@@ -152,12 +157,14 @@ class State():
  
         while stack:
             r, c = stack.pop()
+
             if (r, c) in group.members:
                 continue
             group.members.add((r, c))
  
             for nr, nc in self.neighbours(r, c):
                 neighbour_colour = board[nr, nc]
+
                 if neighbour_colour == 0:
                     group.liberties.add((nr, nc))
                 elif neighbour_colour == colour and (nr, nc) not in group.members:
@@ -216,22 +223,24 @@ class Game():
  
     def legal_moves(self):
         moves = ["pass"]
+
         for row in range(9):
             for column in range(9):
                 if self.is_legal((row, column)):
                     moves.append((row, column))
+
         return moves
 
     def compute_mask(self, moves):
-        mask = np.zeros((9, 9), dtype=bool)
+        mask = np.full(82, -np.inf, dtype=np.float32)
+        mask[81] = 0.0  # pass always legal
+
         for move in moves:
             if move != "pass":
                 row, column = move
-                mask[row, column] = True
+                mask[9*row + column] = 0.0
 
-        flat = mask.reshape(81)
-        full_mask = np.append(flat, True)
-        return torch.from_numpy(full_mask)
+        return mask
  
     def play(self, move):
         if move == "pass":
@@ -240,6 +249,8 @@ class Game():
             self.moves.append(move)
             self.trajectory.append(self.state.board.copy())
             self.history.add(self.state.board.tobytes())
+            self.state.last_passed = True
+            self.state.mask = self.compute_mask(self.legal_moves())
             return True
  
         if not self.is_legal(move):
@@ -254,6 +265,13 @@ class Game():
         self.moves.append(move)
         self.trajectory.append(self.state.board.copy())
         self.history.add(self.state.board.tobytes())
+
+        moves = self.legal_moves()
+        mask = self.compute_mask(moves)
+        self.state.mask = mask
+
+        self.state.last_passed = False
+
         return True
  
     def is_over(self): # check if game has ended. returns true / false
@@ -335,3 +353,6 @@ class Game():
                 return move
             
             print("\n❌ Invalid Input.\n")
+
+    def index_to_move(self, index):
+        return "pass" if index == 81 else (index // 9, index % 9)
