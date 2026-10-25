@@ -33,15 +33,10 @@ class Node: # initialise on discovery
         self.terminal_value = 0.
         self.is_expanded = False
 
-    def expand(self, game):
+    def expand(self, game, output):
         self.is_expanded = True
         self.game = game
         self.to_move = game.state.to_move
- 
-        x = self.search.state_to_tensor(game.state)
- 
-        with torch.no_grad():
-            output = self.search.model(x, mask=game.state.mask)[0]
  
         nn_dist = output[:-1]
         nn_value = output[-1].item()
@@ -66,11 +61,9 @@ class Node: # initialise on discovery
         return max((child for child in self.children if child is not None),
                    key=lambda child: PUCT(self, child, c))
 
-class TreeSearch:
-    def __init__(self, environment, model):
+class TreeSearch: # changed to be GPU-friendly
+    def __init__(self, environment):
         self.environment = environment
-        self.model = model
-        self.model.eval()
  
         representation = importlib.import_module(f"Games.{environment}.representation")
         self.state_to_tensor = representation.state_to_tensor
@@ -84,57 +77,71 @@ class TreeSearch:
         self.exploration_constant = self.hyperparameters["exploration_constant"]
         self.search_depth = self.hyperparameters["search_depth"]
  
-    def search(self, game):
-        root = Node(prior=None, to_move=None, search=self)
-        root.expand(copy.deepcopy(game))
- 
-        # +--- Add Dirichlet Noise to Root ---+
-        legal = [child for child in root.children if child is not None]
-        nablas = np.random.dirichlet([self.alpha] * len(legal))
-        for child, nabla in zip(legal, nablas):
-            child.prior = (1 - self.epsilon) * child.prior + self.epsilon * nabla
- 
-        # +--- Main Search Loop ---+
-        for iteration in range(self.search_depth):
-            current_node = root
+    def start(self, game): # initialises new tree search from a root. root to be evaluated by driver ..
+        self.root = Node(prior=None, to_move=None, search=self)
+        self.simulations = 0
+        self.leaf = self.root
+        self.leaf_game = copy.deepcopy(game)
+        self.path = [self.root]
+        return self.leaf_game.state
+
+    def next_leaf(self): # simply runs down the tree until a "new" node (that model hasn't performed inference on) is found
+        while self.simulations < self.search_depth:
+            current_node = self.root
             path = [current_node]
- 
-            # Traverse Branch:
+
             while current_node.is_expanded:
                 current_node = current_node.compute_best_child()
                 path.append(current_node)
- 
-            if current_node.is_terminal:
-                value = current_node.terminal_value
- 
-            else:
-                child_game = copy.deepcopy(current_node.parent.game)
-                child_game.play(child_game.index_to_move(current_node.parent_action))
- 
-                if child_game.is_over():
-                    current_node.is_terminal = True
-                    current_node.game = child_game
-                    current_node.to_move = child_game.state.to_move
- 
-                    if child_game.result == 0:
-                        current_node.terminal_value = 0.
-                    elif child_game.result == current_node.to_move:
-                        current_node.terminal_value = 1.
-                    else:
-                        current_node.terminal_value = -1.
- 
-                    value = current_node.terminal_value
- 
-                else:
-                    value, _ = current_node.expand(child_game)
 
-            for history_node in path:
-                sign = -1 if history_node.to_move == current_node.to_move else 1
-                history_node.visit_count += 1
-                history_node.value_sum += sign * value
- 
+            if current_node.is_terminal:
+                self.backup(path, current_node, current_node.terminal_value)
+                continue
+
+            child_game = copy.deepcopy(current_node.parent.game)
+            child_game.play(child_game.index_to_move(current_node.parent_action))
+
+            if child_game.is_over():
+                current_node.is_terminal = True
+                current_node.game = child_game
+                current_node.to_move = child_game.state.to_move
+
+                if child_game.result == 0:
+                    current_node.terminal_value = 0.
+                elif child_game.result == current_node.to_move:
+                    current_node.terminal_value = 1.
+                else:
+                    current_node.terminal_value = -1.
+
+                self.backup(path, current_node, current_node.terminal_value)
+                continue
+
+            self.leaf, self.leaf_game, self.path = current_node, child_game, path
+            return child_game.state
+
+        return None
+
+    def receive(self, output):
+        value, _ = self.leaf.expand(self.leaf_game, output)
+
+        if self.leaf is self.root:
+            self.root_output = output
+            legal = [child for child in self.root.children if child is not None]
+            nablas = np.random.dirichlet([self.alpha] * len(legal))
+            for child, nabla in zip(legal, nablas):
+                child.prior = (1 - self.epsilon) * child.prior + self.epsilon * nabla
+        else:
+            self.backup(self.path, self.leaf, value)
+
+    def backup(self, path, leaf, value):
+        for history_node in path:
+            sign = -1 if history_node.to_move == leaf.to_move else 1
+            history_node.visit_count += 1
+            history_node.value_sum += sign * value
+        self.simulations += 1
+
+    def result(self):
         visits = np.array([child.visit_count if child is not None else 0
-                           for child in root.children], dtype=np.float32)
+                           for child in self.root.children], dtype=np.float32)
         policy = visits / visits.sum()
- 
-        return np.append(policy, -root.compute_value()).astype(np.float32)
+        return np.append(policy, -self.root.compute_value()).astype(np.float32)

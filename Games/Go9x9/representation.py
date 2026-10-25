@@ -36,3 +36,6 @@ def state_to_tensor(state):
     x = x.reshape(1, 6, 9, 9)
 
     return x
+
+def to_display(out):
+    return out

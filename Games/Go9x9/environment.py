@@ -1,4 +1,5 @@
 import numpy as np
+import copy
  
 border = "🌳"
 komi = 7
@@ -107,15 +108,13 @@ class State():
         else:
             print(f"Search: {posterior_value:.3f}")
 
-        print("")
-
     def turn(self):
         if self.to_move == 1:
             self.to_move = 2
         else:
             self.to_move = 1
  
-    def action(self, move): # move either a pass or a tuple (row, column) for stone
+    def action(self, move):
         if move == "pass":
             self.turn()
             self.last_passed = True
@@ -175,7 +174,7 @@ class State():
     def resolve(self, move):
         row, column = move
         if self.board[row, column] != 0:
-            return None # occupied
+            return None
  
         colour = self.to_move
         opponent_colour = self.opponent(colour)
@@ -192,14 +191,13 @@ class State():
  
         own_group = self.get_group((row, column), trial_board)
         if len(own_group.liberties) == 0:
-            return None # suicide
+            return None
  
         return trial_board
  
 class Game():
     def __init__(self):
         self.state = State()
-        self.trajectory = [self.state.board.copy()]
         self.moves = []
         self.history = set()
         self.history.add(self.state.board.tobytes())
@@ -207,6 +205,8 @@ class Game():
         self.result = 0
         self.black_score = 0
         self.white_score = 0
+        self.state.mask = self.compute_mask(self.legal_moves())
+        self.trajectory = [copy.deepcopy(self.state)]
  
     def is_legal(self, move):
         if move == "pass":
@@ -214,10 +214,10 @@ class Game():
  
         resulting_board = self.state.resolve(move)
         if resulting_board is None:
-            return False  # occupied or suicide
+            return False
  
         if resulting_board.tobytes() in self.history:
-            return False  # superko: this exact position has occurred before
+            return False
  
         return True
  
@@ -233,7 +233,7 @@ class Game():
 
     def compute_mask(self, moves):
         mask = np.full(82, -np.inf, dtype=np.float32)
-        mask[81] = 0.0  # pass always legal
+        mask[81] = 0.0
 
         for move in moves:
             if move != "pass":
@@ -247,10 +247,10 @@ class Game():
             self.passes += 1
             self.state.turn()
             self.moves.append(move)
-            self.trajectory.append(self.state.board.copy())
             self.history.add(self.state.board.tobytes())
             self.state.last_passed = True
             self.state.mask = self.compute_mask(self.legal_moves())
+            self.trajectory.append(copy.deepcopy(self.state))
             return True
  
         if not self.is_legal(move):
@@ -263,7 +263,6 @@ class Game():
  
         self.passes = 0
         self.moves.append(move)
-        self.trajectory.append(self.state.board.copy())
         self.history.add(self.state.board.tobytes())
 
         moves = self.legal_moves()
@@ -271,10 +270,11 @@ class Game():
         self.state.mask = mask
 
         self.state.last_passed = False
+        self.trajectory.append(copy.deepcopy(self.state))
 
         return True
  
-    def is_over(self): # check if game has ended. returns true / false
+    def is_over(self):
         if self.passes >= 2:
             self.result = self.determine_winner()
 

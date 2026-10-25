@@ -3,35 +3,31 @@ import torch.nn.functional as F
 import numpy as np
 import sys
 
-from functions import Game
+from functions import Game, parse
 from neural_network import Resnet
 from tree import TreeSearch
 
-environments = ["Connect4", "Breakthrough", "Go9x9"]
-
 env = input("\n🌳 Select Environment: ")
+env, player = parse(env)
 
-if env in {"go", "Go", "9x9Go"}:
-    environment = environments[2] # 9x9 Go
-    colour = input("\n⚫ / ⚪ ? : ")
-    if colour in {"b", "black", "Black"}:
-        player = 1
-    else:
-        player = 2
+resnet = Resnet(environment=env)
+game = Game(environment=env)()
+tree = TreeSearch(environment=env, model=resnet)
 
-resnet = Resnet(environment=environment)
-game = Game(environment=environment)()
-tree = TreeSearch(environment=environment, model=resnet)
-
-if environment == "Go9x9":
-    from Games.Go9x9.representation import state_to_tensor
+if env == "Go9x9":
+    from Games.Go9x9.representation import state_to_tensor, to_display
+    output_size = 83
+elif env == "Breakthrough":
+    from Games.Breakthrough.representation import state_to_tensor, to_display
+    output_size = 65
 
 while game.is_over() == False:
     if player == 1 and game.moves == []:
-        game.state.show(prior=torch.zeros(83), posterior=torch.zeros(83))
+        game.state.show(prior=torch.zeros(output_size), posterior=torch.zeros(output_size))
 
         boo = False
 
+        print("")
         while boo is False:    
             move = game.get_human_move()
                     
@@ -48,20 +44,22 @@ while game.is_over() == False:
 
     x = state_to_tensor(game.state)
     mask = game.state.mask
+
     nn_output = resnet.forward(x, mask)
     tree_output = tree.search(game=game)
+
     index = np.argmax(tree_output[:-1])
     argmax_move = game.index_to_move(index)
-
-    game.state.show(prior=nn_output, posterior=tree_output)
+    game.state.show(prior=to_display(nn_output), posterior=to_display(tree_output))
     game.play(argmax_move)
 
-    print("+-----+")
-    game.state.show(prior=torch.zeros(83), posterior=torch.zeros(83))
+    print("\n+-----+")
+    game.state.show(prior=torch.zeros(output_size), posterior=torch.zeros(output_size))
 
     boo = False
-    
-    while boo is False:    
+
+    print("")
+    while boo is False:  
         move = game.get_human_move()
                 
         if move == "end":

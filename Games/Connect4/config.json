@@ -10,6 +10,7 @@
 "hyperparameters" : {"alpha" : 1.6,
                      "epsilon" : 0.25,
                      "exploration_constant" : 1.25,
-                     "search_depth" : 200}
+                     "search_depth" : 200,
+                     "temp_for" : 10}
 }
 

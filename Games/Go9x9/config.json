@@ -2,7 +2,7 @@
 "actions" : 82,
 "architecture" : {"upscale" : [6, 192],
                   "residual_dimension" : 192,
-                  "residual_blocks" : 2,
+                  "residual_blocks" : 10,
                   "downscale" : [192, 48],
                   "policy_architecture" : [3888, 565, 82],
                   "value_architecture": [3888, 62, 1]},
@@ -10,5 +10,6 @@
 "hyperparameters" : {"alpha" : 0.2,
                      "epsilon" : 0.25,
                      "exploration_constant" : 1.25,
-                     "search_depth" : 800}
+                     "search_depth" : 800,
+                     "temp_for" : 20}
 }
