@@ -25,8 +25,8 @@ dataset = run_selfplay(model=model,
                        temp_for=config["hyperparameters"]["temp_for"],
                        state_to_tensor=state_to_tensor,
                        device=device,
-                       n_parallel=1,
-                       n_total=1)
+                       n_parallel=10,
+                       n_total=10)
 
 end = time.time()
 
