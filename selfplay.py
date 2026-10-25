@@ -18,17 +18,19 @@ with open(f"Games/{env}/config.json") as file:
 model = torch.load(f"Games/{env}/Runs/Run0/Models/gen_0.pt",
                    weights_only=False, map_location=device)
 
-start = time.time()
+for var in [16, 32, 64, 128, 256, 512]:
 
-dataset = run_selfplay(model=model,
-                       env=env,
-                       temp_for=config["hyperparameters"]["temp_for"],
-                       state_to_tensor=state_to_tensor,
-                       device=device,
-                       n_parallel=10,
-                       n_total=10)
+    start = time.time()
 
-end = time.time()
+    dataset = run_selfplay(model=model,
+                        env=env,
+                        temp_for=config["hyperparameters"]["temp_for"],
+                        state_to_tensor=state_to_tensor,
+                        device=device,
+                        n_parallel=var,
+                        n_total=var)
 
-print("DONNNNNNNE")
-print(end-start)
+    end = time.time()
+
+    print(var)
+    print(end-start)
