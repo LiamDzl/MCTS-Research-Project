@@ -40,7 +40,9 @@ dataset = run_selfplay(model=model,
                        state_to_tensor=state_to_tensor,
                        device=device,
                        n_parallel=16,
-                       n_total=100)
+                       n_total=16,
+                       display=(worker_id == "1"),
+                       to_display=representation.to_display)
 
 with open(f"{data_dir}/W_{worker_id}.json", "w") as file:
     json.dump(dataset, file)

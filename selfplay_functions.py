@@ -1,5 +1,3 @@
-import json
-import importlib
 import numpy as np
 import torch
 
@@ -73,8 +71,10 @@ def play_single(model, env, temp_for, state_to_tensor, device, display=False, to
 
     return selfplay.dataset()
 
-def run_selfplay(model, env, temp_for, state_to_tensor, device, n_parallel, n_total):
-    games = [SelfPlayGame(env, temp_for) for _ in range(min(n_parallel, n_total))]
+def run_selfplay(model, env, temp_for, state_to_tensor, device, n_parallel, n_total,
+                 display=False, to_display=None):
+    games = [SelfPlayGame(env, temp_for, display=display, to_display=to_display)
+             for _ in range(min(n_parallel, n_total))]
     games_started = len(games)
     dataset = []
 
@@ -88,7 +88,7 @@ def run_selfplay(model, env, temp_for, state_to_tensor, device, n_parallel, n_to
             if g.game.is_over():
                 dataset.extend(g.dataset())
                 if games_started < n_total:
-                    still_running.append(SelfPlayGame(env, temp_for))
+                    still_running.append(SelfPlayGame(env, temp_for, display=display, to_display=to_display))
                     games_started += 1
             else:
                 still_running.append(g)
