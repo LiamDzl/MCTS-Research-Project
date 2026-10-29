@@ -22,8 +22,3 @@ model.eval().to(device)
 
 dataset = play_single(model, env, temp_for, representation.state_to_tensor, device,
                       display=True, to_display=representation.to_display)
-
-for data in dataset:
-    environment.show(data["state"].board)
-    print(data["search"])
-    print(data["outcome"])

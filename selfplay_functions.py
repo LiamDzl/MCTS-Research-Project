@@ -45,7 +45,8 @@ class SelfPlayGame:
         dataset = []
         for index, state in enumerate(self.game.trajectory[:-1]):
             data = {
-                    "state": state,
+                    "state": {"board": state.board.tolist(),
+                              "to_move": state.to_move},
                     "search": (self.tree_distrs[index]).tolist(),
                     "outcome": outcome_fn(to_move=state.to_move,
                                           outcome=self.game.result),
